@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>빗썸 거래량 모니터</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    margin:0;padding:24px;background:#f7f8fa;color:#1f2937}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{font-size:13px;color:#6b7280;margin-bottom:16px}
+  header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap;gap:12px}
+  .meta{display:flex;align-items:center;gap:12px;font-size:13px;color:#374151}
+  button{padding:6px 14px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px}
+  button:hover{background:#f3f4f6}
+  button:disabled{opacity:.5;cursor:wait}
+  .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:9999px;background:#eef2ff;color:#4f46e5;margin-left:6px;vertical-align:middle}
+  table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:13px}
+  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid #f1f5f9}
+  th{background:#f9fafb;font-weight:600;color:#374151;font-size:12px}
+  th:first-child,td:first-child{text-align:left;font-weight:600}
+  th.cen,td.cen{text-align:center}
+  thead th{border-bottom:1px solid #e5e7eb}
+  tbody tr:hover{background:#fafbfc}
+  tbody tr:last-child td{border-bottom:none}
+  .yes{color:#16a34a;font-weight:700;font-size:14px}
+  .no{color:#cbd5e1}
+  .x{color:#dc2626;font-weight:700;font-size:11px}
+  .num{font-variant-numeric:tabular-nums}
+  .loading{color:#9ca3af}
+  .ratio{font-weight:600}
+  .r-low{color:#16a34a}
+  .r-mid{color:#ea580c}
+  .r-high{color:#dc2626;font-weight:700}
+  .err{color:#dc2626}
+  footer{margin-top:16px;font-size:11px;color:#9ca3af;line-height:1.7}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>빗썸 거래량 모니터<span class="pill">내부용</span></h1>
+    <div class="sub">KST 캘린더 기준 · 빗썸 1시간봉 typical price × volume 합산</div>
+  </div>
+  <div class="meta">
+    <span id="updated" class="loading">조회 중...</span>
+    <button id="refresh">새로고침</button>
+  </div>
+</header>
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">티커</th>
+      <th colspan="2" class="cen">해외 헷지</th>
+      <th colspan="2" class="cen">게이트 (Loan)</th>
+      <th rowspan="2">내부 물량</th>
+      <th rowspan="2">시총</th>
+      <th rowspan="2">전일 거래량</th>
+      <th rowspan="2">당일 거래량</th>
+      <th rowspan="2">당일/내부</th>
+    </tr>
+    <tr>
+      <th class="cen">바낸</th>
+      <th class="cen">바빗</th>
+      <th class="cen">Loan</th>
+      <th class="cen">Margin</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+
+<footer>
+  · 당일 거래량은 KST 00:00부터 조회 시점까지의 누적값입니다 (자정에 0으로 초기화)<br>
+  · 거래대금 = Σ(시간봉 typical price × volume), typical price = (open+close+high+low)/4<br>
+  · 60초마다 자동 갱신
+</footer>
+
+<script>
+const ROWS = [
+  {t:'ACE',     hedge:[1,0,0,0],   internal:35.6e8,  mcap:174.876e8, prev:237558284},
+  {t:'ASTER',   hedge:[0,1,1,1],   internal:36.9e8,  mcap:2.415e12,  prev:143342700},
+  {t:'C98',     hedge:[1,1,1,1],   internal:15.9e8,  mcap:311.2e8,   prev:242274599},
+  {t:'CAKE',    hedge:[1,1,1,1],   internal:22.8e8,  mcap:7473.2e8,  prev:55868183},
+  {t:'COOKIE',  hedge:[0,1,1,1],   internal:11.5e8,  mcap:184.9e8,   prev:351962894},
+  {t:'CYS',     hedge:[0,0,1,'X'], internal:23.2e8,  mcap:108.1e8,   prev:2952749033},
+  {t:'D',       hedge:[0,0,1,1],   internal:40.7e8,  mcap:148.2e8,   prev:12674982860},
+  {t:'EDU',     hedge:[1,0,1,1],   internal:34.9e8,  mcap:499.4e8,   prev:1488832231},
+  {t:'FLOKI',   hedge:[1,1,1,1],   internal:81.4e8,  mcap:4727.5e8,  prev:144324389},
+  {t:'GMT',     hedge:[1,1,1,1],   internal:18.7e8,  mcap:548.3e8,   prev:168763469},
+  {t:'HIGH',    hedge:[1,0,1,1],   internal:35.7e8,  mcap:263.7e8,   prev:5124054355},
+  {t:'IOST',    hedge:[0,0,1,1],   internal:16.8e8,  mcap:537.9e8,   prev:56995639},
+  {t:'LISTA',   hedge:[1,0,1,1],   internal:8.3e8,   mcap:450.5e8,   prev:372374274},
+  {t:'PARTI',   hedge:[0,1,1,1],   internal:30.6e8,  mcap:340.8e8,   prev:1276847450},
+  {t:'PUMPBTC', hedge:[0,0,0,0],   internal:89.9e8,  mcap:114.7e8,   prev:4635895480},
+  {t:'SFP',     hedge:[1,0,0,0],   internal:11.3e8,  mcap:2652.7e8,  prev:748680834},
+  {t:'THE',     hedge:[0,0,1,1],   internal:18.9e8,  mcap:200.7e8,   prev:434734638},
+  {t:'XVS',     hedge:[0,0,1,1],   internal:33.8e8,  mcap:641.7e8,   prev:513551998},
+];
+
+const KRW = (v) => {
+  if (v == null || isNaN(v)) return '-';
+  if (v >= 1e12) return (v/1e12).toFixed(3) + '조';
+  if (v >= 1e8)  return (v/1e8).toFixed(1) + '억';
+  return Math.round(v).toLocaleString();
+};
+
+const PCT = (v) => v == null ? '-' : (v*100).toFixed(1) + '%';
+
+function hedgeCell(v) {
+  if (v === 'X') return '<span class="x">X</span>';
+  return v ? '<span class="yes">●</span>' : '<span class="no">·</span>';
+}
+
+function ratioClass(r) {
+  if (r == null) return '';
+  if (r < 0.5) return 'r-low';
+  if (r < 1.0) return 'r-mid';
+  return 'r-high';
+}
+
+function getKstTodayBounds() {
+  const fmt = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Seoul'});
+  const [y, m, d] = fmt.format(new Date()).split('-').map(Number);
+  const startMs = Date.UTC(y, m-1, d) - 9*3600*1000;
+  return [startMs, startMs + 86400000];
+}
+
+async function fetchTodayVolume(ticker, startMs, endMs) {
+  const url = `https://api.bithumb.com/public/candlestick/${ticker}_KRW/1h`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.status !== '0000') throw new Error(data.message || 'API error');
+  let total = 0;
+  for (const row of data.data) {
+    const ts = +row[0];
+    if (ts >= startMs && ts < endMs) {
+      const o = +row[1], c = +row[2], h = +row[3], l = +row[4], v = +row[5];
+      total += ((o + c + h + l) / 4) * v;
+    }
+  }
+  return total;
+}
+
+function renderInitial() {
+  document.getElementById('tbody').innerHTML = ROWS.map((r, i) => `
+    <tr data-i="${i}">
+      <td>${r.t}</td>
+      <td class="cen">${hedgeCell(r.hedge[0])}</td>
+      <td class="cen">${hedgeCell(r.hedge[1])}</td>
+      <td class="cen">${hedgeCell(r.hedge[2])}</td>
+      <td class="cen">${hedgeCell(r.hedge[3])}</td>
+      <td class="num">${KRW(r.internal)}</td>
+      <td class="num">${KRW(r.mcap)}</td>
+      <td class="num">${KRW(r.prev)}</td>
+      <td class="num today loading">조회 중</td>
+      <td class="num ratio loading">-</td>
+    </tr>
+  `).join('');
+}
+
+async function refresh() {
+  const btn = document.getElementById('refresh');
+  const upd = document.getElementById('updated');
+  btn.disabled = true;
+  upd.textContent = '갱신 중...';
+  upd.className = 'loading';
+
+  const [s, e] = getKstTodayBounds();
+  const results = await Promise.all(ROWS.map(r =>
+    fetchTodayVolume(r.t, s, e)
+      .then(v => ({v, err:null}))
+      .catch(err => ({v:null, err: err.message || 'fail'}))
+  ));
+
+  results.forEach((res, i) => {
+    const tr = document.querySelector(`tr[data-i="${i}"]`);
+    const tdToday = tr.querySelector('.today');
+    const tdRatio = tr.querySelector('.ratio');
+    if (res.err) {
+      tdToday.textContent = '에러';
+      tdToday.className = 'num today err';
+      tdRatio.textContent = '-';
+      tdRatio.className = 'num ratio';
+    } else {
+      tdToday.textContent = KRW(res.v);
+      tdToday.className = 'num today';
+      const r = ROWS[i].internal ? res.v / ROWS[i].internal : null;
+      tdRatio.textContent = PCT(r);
+      tdRatio.className = 'num ratio ' + ratioClass(r);
+    }
+  });
+
+  const fmt = new Intl.DateTimeFormat('ko-KR', {
+    timeZone:'Asia/Seoul',
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
+  });
+  upd.textContent = `조회 시각: ${fmt.format(new Date())} KST`;
+  upd.className = '';
+  btn.disabled = false;
+}
+
+renderInitial();
+refresh();
+setInterval(refresh, 60_000);
+document.getElementById('refresh').addEventListener('click', refresh);
+</script>
+</body>
+</html>
